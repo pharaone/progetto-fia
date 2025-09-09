@@ -111,25 +111,41 @@ def knn_impute(df: pd.DataFrame, discrete_cols: list = None, n_neighbors: int = 
 
 def encode_categoricals(df: pd.DataFrame, train_mask: pd.Series) -> pd.DataFrame:
     categorical = ['Deck', 'HomePlanet', 'Destination', 'Side', 'Cabin_region']
-    df[categorical] = df[categorical].fillna("Unknown")
 
+    for col in categorical:
+        if col in df.columns:
+            if pd.api.types.is_categorical_dtype(df[col]):
+                df[col] = df[col].cat.add_categories("Unknown")
+            df[col] = df[col].fillna("Unknown")
+            df[col] = df[col].astype(str)
+
+    # OneHotEncoder
     encoder = OneHotEncoder(handle_unknown="ignore", sparse_output=False, drop="first")
     encoder.fit(df.loc[train_mask, categorical])
 
     encoded_array = encoder.transform(df[categorical])
-    encoded_df = pd.DataFrame(encoded_array, columns=encoder.get_feature_names_out(categorical), index=df.index)
+    encoded_df = pd.DataFrame(
+        encoded_array,
+        columns=encoder.get_feature_names_out(categorical),
+        index=df.index
+    )
 
     df = df.drop(columns=categorical)
     df = pd.concat([df, encoded_df], axis=1)
+
     return df
 
 
+
+
 def remove_highly_correlated(df: pd.DataFrame, threshold: float = 0.9) -> pd.DataFrame:
-    corr_matrix = df.corr().abs()
+    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    corr_matrix = df[numeric_cols].corr().abs()
     upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
     to_drop = [col for col in upper.columns if any(upper[col] > threshold)]
     df = df.drop(columns=to_drop)
     return df
+
 
 
 def preprocess_dataset(df: pd.DataFrame, train_mask: pd.Series = None) -> pd.DataFrame:
