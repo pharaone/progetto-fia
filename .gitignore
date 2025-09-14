@@ -1,0 +1,52 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pkl
+*.h5
+*.joblib
+
+# --- Notebook ---
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+ENV/
+*.egg-info/
+.eggs/
+
+# --- Dati e modelli (ignora se troppo grandi o temporanei) ---
+data/
+datasets/
+*.csv
+*.tsv
+*.json
+*.npz
+*.npy
+*.hdf5
+*.model
+*.ckpt
+*.pth
+*.pt
+
+# --- Log e output ---
+*.log
+logs/
+output/
+runs/
+
+# --- IDE / Editor ---
+# PyCharm / IntelliJ
+.idea/
+*.iml
+
+# VSCode
+.vscode/
+
+# --- Sistema operativo ---
+.DS_Store
+Thumbs.db
