@@ -1,4 +1,3 @@
-# adaboost_kfold_min.py
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional, Tuple
@@ -30,7 +29,7 @@ class ConfigAdaBoost:
     # Parametri AdaBoost
     n_estimators: int = 300
     learning_rate: float = 0.1
-    algorithm: str = "SAMME.R"  # probabilità più stabili
+    algorithm: str = "SAMME"  # probabilità più stabili
     base_max_depth: int = 3     # stump (classico per AdaBoost)
     # colonne da escludere (ID, testo libero, potenziale leakage)
     drop_cols: Tuple[str, ...] = ("PassengerId", "Name", "Cabin")

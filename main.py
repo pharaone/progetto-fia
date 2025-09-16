@@ -1,5 +1,6 @@
-# main.py
 import pandas as pd
+
+from Adaboost import AdaBoostCV
 from preprocessing.preprocessing import preprocess_dataset
 from randomforest import RandomForestCV
 
@@ -13,6 +14,7 @@ def main():
 
     # 4) addestra RandomForestCV
     model = RandomForestCV().fit(train_p)
+    model2 = AdaBoostCV().fit(train_p)
 
     # 5) metriche OOF
     print("=== METRICHE OUT-OF-FOLD ===")
@@ -25,6 +27,18 @@ def main():
     print("\nSalvataggio grafici ROC/PR...")
     model.plot_oof_roc(train_p, save_path="roc_oof.png")
     model.plot_oof_pr(train_p, save_path="pr_oof.png")
+
+    # 5) metriche OOF
+    print("=== METRICHE OUT-OF-FOLD ===")
+    print(model2.oof_metrics(train_p, threshold=0.5))
+    print("\n=== METRICHE PER FOLD ===")
+    for m in model2.per_fold_metrics(train_p, threshold=0.5):
+        print(m)
+
+    # 6) curve ROC/PR salvate su file
+    print("\nSalvataggio grafici ROC/PR...")
+    model2.plot_oof_roc(train_p, save_path="roc_oof.png")
+    model2.plot_oof_pr(train_p, save_path="pr_oof.png")
 
 if __name__ == "__main__":
     main()
