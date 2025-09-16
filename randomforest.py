@@ -24,17 +24,19 @@ import matplotlib.pyplot as plt
 
 @dataclass
 class Config:
-    """Configurazione base per RF + K-Fold."""
-    n_splits: int = 5            # numero di fold
+    """Configurazione base per RandomForest + K-Fold."""
+    n_splits: int = 5            # numero di fold per cross-validation
     random_state: int = 42       # seed per riproducibilità
-    shuffle: bool = True         # shuffle degli indici
-    # Parametri della RandomForest
-    n_estimators: int = 500
-    max_depth: Optional[int] = None
-    max_features: str = "sqrt"
-    n_jobs: int = -1
-    class_weight: Optional[str] = None
-    # colonne da escludere (ID, testo libero, potenziale leakage)
+    shuffle: bool = True         # se mescolare i dati nei fold
+
+    # Parametri del RandomForest (puoi modificarli a piacere)
+    n_estimators: int = 500      # numero di alberi nella foresta
+    max_depth: Optional[int] = None  # profondità massima degli alberi (None = cresce fino a foglie pure)
+    max_features: str = "sqrt"   # numero di feature considerate a ogni split
+    n_jobs: int = -1             # usa tutti i core disponibili
+    class_weight: Optional[str] = None  # bilanciamento classi, es. "balanced"
+
+    # colonne da escludere dal training (ID, testo libero o leakage)
     drop_cols: Tuple[str, ...] = ("PassengerId", "Name", "Cabin")
 
 
@@ -48,18 +50,23 @@ class RandomForestCV:
 
     def __init__(self, cfg: Optional[Config] = None):
         self.cfg = cfg or Config()
-        self.models_: List[Pipeline] = []          # pipeline salvate per ogni fold
-        self.oof_proba_: Optional[np.ndarray] = None  # predizioni probabilistiche OOF
-        self.fold_indices_: List[np.ndarray] = []  # indici di validazione per fold
+        self.models_: List[Pipeline] = []             # pipeline allenate per ogni fold
+        self.oof_proba_: Optional[np.ndarray] = None  # probabilità OOF per tutti i campioni
+        self.fold_indices_: List[np.ndarray] = []     # indici di validazione per ciascun fold
 
     # ---------------- SPLIT ----------------
     def _split_X_y(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
-        """Divide X e y, rimuovendo colonne indesiderate."""
+        """
+        Divide il DataFrame in X (feature) e y (target).
+        Rimuove colonne indesiderate definite in Config.
+        """
         if "Transported" not in df.columns:
             raise ValueError("Manca la colonna target 'Transported'.")
-        X = df.drop(columns=["Transported"])
+        # target binario
         y = df["Transported"].astype(int)
-        # drop opzionali (PassengerId, ecc.)
+        # feature iniziali
+        X = df.drop(columns=["Transported"])
+        # rimuovo colonne come PassengerId, Name, Cabin
         drop = [c for c in self.cfg.drop_cols if c in X.columns]
         if drop:
             X = X.drop(columns=drop)
@@ -67,16 +74,20 @@ class RandomForestCV:
 
     # ---------------- PIPELINE ----------------
     def _make_pipeline(self, X: pd.DataFrame) -> Pipeline:
-        """Pipeline: imputazione + OneHotEncoder + RandomForest."""
-        # selettori automatici numeriche / categoriche
+        """
+        Costruisce una pipeline che:
+        - imputazione numeriche con mediana
+        - imputazione categoriche con moda + one-hot encoding
+        - RandomForestClassifier
+        """
+        # selezione automatica di colonne numeriche e categoriche
         num_sel = selector(dtype_include=np.number)
         cat_sel = selector(dtype_include=object)
 
+        # preprocessing: gestisce missing + encoding
         pre = ColumnTransformer(
             transformers=[
-                # imputazione median per numeriche
                 ("num", SimpleImputer(strategy="median"), num_sel),
-                # imputazione most_frequent + one-hot per categoriche
                 ("cat", Pipeline([
                     ("imp", SimpleImputer(strategy="most_frequent")),
                     ("oh", OneHotEncoder(handle_unknown="ignore", sparse_output=False)),
@@ -86,6 +97,7 @@ class RandomForestCV:
             verbose_feature_names_out=False,
         )
 
+        # classificatore RandomForest
         rf = RandomForestClassifier(
             n_estimators=self.cfg.n_estimators,
             max_depth=self.cfg.max_depth,
@@ -94,25 +106,36 @@ class RandomForestCV:
             class_weight=self.cfg.class_weight,
             random_state=self.cfg.random_state,
         )
+
+        # unisco preprocessing + classificatore
         return Pipeline([("pre", pre), ("rf", rf)])
 
     # ---------------- TRAIN ----------------
     def fit(self, df: pd.DataFrame) -> "RandomForestCV":
-        """Addestra il modello con k-fold stratificato."""
+        """
+        Addestra il modello con StratifiedKFold:
+        - per ogni fold: fit su train, predizioni su validazione
+        - salva predizioni OOF (out-of-fold)
+        """
         X, y = self._split_X_y(df)
         skf = StratifiedKFold(
-            n_splits=self.cfg.n_splits, shuffle=self.cfg.shuffle, random_state=self.cfg.random_state
+            n_splits=self.cfg.n_splits,
+            shuffle=self.cfg.shuffle,
+            random_state=self.cfg.random_state
         )
         self.models_.clear()
         self.fold_indices_.clear()
         self.oof_proba_ = np.zeros(len(X), dtype=float)
 
-        # ciclo sui fold
+        # ciclo su ciascun fold
         for tr_idx, va_idx in skf.split(X, y):
+            # pipeline RF + preprocessing
             pipe = self._make_pipeline(X)
+            # fit su training fold
             pipe.fit(X.iloc[tr_idx], y.iloc[tr_idx])
-
-            proba = pipe.predict_proba(X.iloc[va_idx])[:, 1]  # predizioni probabilistiche classe 1
+            # predizioni probabilistiche sul fold di validazione
+            proba = pipe.predict_proba(X.iloc[va_idx])[:, 1]
+            # salvo predizioni OOF
             self.oof_proba_[va_idx] = proba
             self.models_.append(pipe)
             self.fold_indices_.append(va_idx)
@@ -122,7 +145,10 @@ class RandomForestCV:
     # ---------------- METRICHE ----------------
     @staticmethod
     def _metrics(y_true: np.ndarray, proba: np.ndarray, thr: float = 0.5) -> Dict[str, Any]:
-        """Calcola metriche base e confusion matrix."""
+        """
+        Calcola metriche di classificazione + confusion matrix
+        per un set di predizioni probabilistiche.
+        """
         y_hat = (proba >= thr).astype(int)
         tn, fp, fn, tp = confusion_matrix(y_true, y_hat).ravel()
         return {
@@ -137,14 +163,21 @@ class RandomForestCV:
         }
 
     def oof_metrics(self, df: pd.DataFrame, threshold: float = 0.5) -> Dict[str, Any]:
-        """Metriche su tutte le predizioni OOF."""
+        """
+        Calcola metriche complessive OOF (su tutto il training set).
+        Questo è il modo corretto di stimare la performance del modello
+        senza usare i dati del test.
+        """
         if self.oof_proba_ is None:
             raise RuntimeError("Chiama fit() prima.")
         _, y = self._split_X_y(df)
         return self._metrics(y.values, self.oof_proba_, threshold)
 
     def per_fold_metrics(self, df: pd.DataFrame, threshold: float = 0.5) -> List[Dict[str, Any]]:
-        """Metriche per singolo fold (usando indici validazione)."""
+        """
+        Calcola metriche per ogni singolo fold, utile per vedere
+        la variabilità delle performance.
+        """
         if self.oof_proba_ is None or not self.fold_indices_:
             raise RuntimeError("Chiama fit() prima.")
         _, y = self._split_X_y(df)
@@ -152,13 +185,15 @@ class RandomForestCV:
         for i, va_idx in enumerate(self.fold_indices_, 1):
             m = self._metrics(y.iloc[va_idx].values, self.oof_proba_[va_idx], threshold)
             m["fold"] = i
-            m["support"] = int(len(va_idx))
+            m["support"] = int(len(va_idx))  # numero di esempi nel fold
             out.append(m)
         return out
 
     # ---------------- CURVE ----------------
     def plot_oof_roc(self, df: pd.DataFrame, save_path: Optional[str] = None) -> float:
-        """Plotta ROC OOF e ritorna l’AUC."""
+        """
+        Plotta la curva ROC sulle predizioni OOF e ritorna l’AUC.
+        """
         if self.oof_proba_ is None:
             raise RuntimeError("Chiama fit() prima.")
         _, y = self._split_X_y(df)
@@ -177,7 +212,10 @@ class RandomForestCV:
         return float(auc)
 
     def plot_oof_pr(self, df: pd.DataFrame, save_path: Optional[str] = None) -> float:
-        """Plotta Precision–Recall OOF e ritorna AP (average precision)."""
+        """
+        Plotta la curva Precision–Recall sulle predizioni OOF
+        e ritorna l’Average Precision (AP).
+        """
         if self.oof_proba_ is None:
             raise RuntimeError("Chiama fit() prima.")
         _, y = self._split_X_y(df)
@@ -196,16 +234,26 @@ class RandomForestCV:
 
     # ---------------- INFERENZA ----------------
     def predict_proba(self, df: pd.DataFrame) -> np.ndarray:
-        """Predizioni probabilistiche mediate tra i fold."""
+        """
+        Predizioni probabilistiche su un nuovo dataset (es. test).
+        Le probabilità sono mediate tra i modelli dei vari fold (soft voting).
+        """
         if not self.models_:
             raise RuntimeError("Chiama fit() prima.")
+        # rimuovo colonna target se presente
         X = df.drop(columns=[c for c in ("Transported",) if c in df.columns]).copy()
+        # rimuovo colonne inutili
         drop = [c for c in self.cfg.drop_cols if c in X.columns]
         if drop:
             X = X.drop(columns=drop)
+        # predizioni da ciascun fold
         probs = [m.predict_proba(X)[:, 1] for m in self.models_]
+        # media delle probabilità
         return np.mean(np.vstack(probs), axis=0)
 
     def predict(self, df: pd.DataFrame, threshold: float = 0.5) -> np.ndarray:
-        """Predizione binaria con soglia (default 0.5)."""
+        """
+        Predizioni binarie su un nuovo dataset, applicando una soglia
+        (default 0.5) alle probabilità.
+        """
         return (self.predict_proba(df) >= threshold).astype(int)
