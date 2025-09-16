@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+from sklearn.preprocessing import StandardScaler
 
 
 def knn_impute(df: pd.DataFrame, discrete_cols: list = None, n_neighbors: int = 15) -> pd.DataFrame:
