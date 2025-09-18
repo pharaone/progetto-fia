@@ -11,12 +11,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import StratifiedKFold
-from sklearn.metrics import (
-    accuracy_score, precision_score, recall_score, f1_score,
-    roc_auc_score, average_precision_score, confusion_matrix,
-    roc_curve, precision_recall_curve
-)
-import matplotlib.pyplot as plt
+from sklearn.metrics import confusion_matrix
 
 
 @dataclass
@@ -37,11 +32,9 @@ class Config:
 
 class RandomForestCV:
     """
-    - allena RF con StratifiedKFold
-    - metriche OOF (unico set)
-    - metriche per fold
-    - media delle metriche per fold (pesata o semplice)
-    - curve ROC / PR su OOF
+    - Allena RF con StratifiedKFold
+    - Tiene le proba OOF
+    - Espone un unico riassunto: accuracy media, std, confusion matrix OOF
     """
 
     def __init__(self, cfg: Optional[Config] = None):
@@ -109,96 +102,38 @@ class RandomForestCV:
 
         return self
 
-    # --- metriche base ---
-    @staticmethod
-    def _metrics(y_true: np.ndarray, proba: np.ndarray, thr: float = 0.5) -> Dict[str, Any]:
-        y_hat = (proba >= thr).astype(int)
-        tn, fp, fn, tp = confusion_matrix(y_true, y_hat).ravel()
-        return {
-            "threshold": thr,
-            "confusion_matrix": {"tn": int(tn), "fp": int(fp), "fn": int(fn), "tp": int(tp)},
-            "accuracy": accuracy_score(y_true, y_hat),
-            "precision": precision_score(y_true, y_hat, zero_division=0),
-            "recall": recall_score(y_true, y_hat, zero_division=0),
-            "f1": f1_score(y_true, y_hat, zero_division=0),
-            "roc_auc": roc_auc_score(y_true, proba),
-            "pr_auc": average_precision_score(y_true, proba),
-        }
-
-    # --- 1) metriche singole OOF (unico set) ---
-    def oof_metrics(self, df: pd.DataFrame, threshold: float = 0.5) -> Dict[str, Any]:
-        if self.oof_proba_ is None:
-            raise RuntimeError("Chiama fit() prima.")
-        _, y = self._split_X_y(df)
-        return self._metrics(y.values, self.oof_proba_, threshold)
-
-    # --- 2) metriche per fold ---
-    def per_fold_metrics(self, df: pd.DataFrame, threshold: float = 0.5) -> List[Dict[str, Any]]:
+    # --- riassunto richiesto ---
+    def summary_metrics(self, df: pd.DataFrame, threshold: float = 0.5) -> Dict[str, Any]:
+        """
+        Ritorna un dict con:
+          - 'accuracy_mean': media dell'accuratezza sui fold
+          - 'accuracy_std': deviazione standard (campionaria) dell'accuratezza sui fold
+          - 'confusion_matrix': dict {tn, fp, fn, tp} calcolata OOF con il threshold dato
+        """
         if self.oof_proba_ is None or not self.fold_indices_:
             raise RuntimeError("Chiama fit() prima.")
+
         _, y = self._split_X_y(df)
-        out = []
-        for i, va_idx in enumerate(self.fold_indices_, 1):
-            m = self._metrics(y.iloc[va_idx].values, self.oof_proba_[va_idx], threshold)
-            m["fold"] = i
-            m["support"] = int(len(va_idx))
-            out.append(m)
-        return out
+        y = y.values
 
-    # --- 3) media delle metriche per fold (pesata o semplice) ---
-    def mean_fold_metrics(
-        self,
-        df: pd.DataFrame,
-        threshold: float = 0.5,
-        weighted: bool = True,
-    ) -> Dict[str, float]:
-        """
-        Ritorna un unico valore per metrica mediando i risultati dei fold.
-        weighted=True -> media pesata per numero di esempi nel fold (consigliato).
-        """
-        per_fold = self.per_fold_metrics(df, threshold=threshold)
-        keys = ["accuracy", "precision", "recall", "f1", "roc_auc", "pr_auc"]
-        weights = np.array([m["support"] for m in per_fold], dtype=float)
-        weights = (weights / weights.sum()) if weighted else np.ones_like(weights) / len(weights)
+        # accuracy per fold
+        fold_acc = []
+        for va_idx in self.fold_indices_:
+            y_hat_fold = (self.oof_proba_[va_idx] >= threshold).astype(int)
+            acc_fold = (y[va_idx] == y_hat_fold).mean()
+            fold_acc.append(acc_fold)
 
-        out: Dict[str, float] = {}
-        for k in keys:
-            vals = np.array([m[k] for m in per_fold], dtype=float)
-            out[k] = float(np.sum(vals * weights))
-        return out
+        acc_mean = float(np.mean(fold_acc))
+        acc_std = float(np.std(fold_acc, ddof=1)) if len(fold_acc) > 1 else 0.0
 
-    # --- curve (OOF) ---
-    def plot_oof_roc(self, df: pd.DataFrame, save_path: Optional[str] = None) -> float:
-        if self.oof_proba_ is None:
-            raise RuntimeError("Chiama fit() prima.")
-        _, y = self._split_X_y(df)
-        fpr, tpr, _ = roc_curve(y, self.oof_proba_)
-        auc = roc_auc_score(y, self.oof_proba_)
-        plt.figure()
-        plt.plot(fpr, tpr, label=f"AUC={auc:.4f}")
-        plt.plot([0, 1], [0, 1], linestyle="--")
-        plt.xlabel("False Positive Rate")
-        plt.ylabel("True Positive Rate")
-        plt.title("ROC OOF - RandomForest")
-        plt.legend()
-        if save_path:
-            plt.savefig(save_path, bbox_inches="tight")
-        plt.close()
-        return float(auc)
+        # confusion matrix OOF complessiva
+        y_hat = (self.oof_proba_ >= threshold).astype(int)
+        tn, fp, fn, tp = confusion_matrix(y, y_hat).ravel()
 
-    def plot_oof_pr(self, df: pd.DataFrame, save_path: Optional[str] = None) -> float:
-        if self.oof_proba_ is None:
-            raise RuntimeError("Chiama fit() prima.")
-        _, y = self._split_X_y(df)
-        prec, rec, _ = precision_recall_curve(y, self.oof_proba_)
-        ap = average_precision_score(y, self.oof_proba_)
-        plt.figure()
-        plt.plot(rec, prec, label=f"AP={ap:.4f}")
-        plt.xlabel("Recall")
-        plt.ylabel("Precision")
-        plt.title("Precision–Recall OOF - RandomForest")
-        plt.legend()
-        if save_path:
-            plt.savefig(save_path, bbox_inches="tight")
-        plt.close()
-        ret
+        return {
+            "n_splits": self.cfg.n_splits,
+            "threshold": threshold,
+            "accuracy_mean": acc_mean,
+            "accuracy_std": acc_std,
+            "confusion_matrix": {"tn": int(tn), "fp": int(fp), "fn": int(fn), "tp": int(tp)},
+        }
