@@ -15,13 +15,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.ensemble import AdaBoostClassifier
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.model_selection import StratifiedKFold
-from sklearn.metrics import (
-    accuracy_score, precision_score, recall_score, f1_score,
-    roc_auc_score, average_precision_score, confusion_matrix,
-    roc_curve, precision_recall_curve
-)
-
-import matplotlib.pyplot as plt
+from sklearn.metrics import confusion_matrix
 
 logger = logging.getLogger(__name__)
 
@@ -34,21 +28,18 @@ class ConfigAdaBoost:
     # Parametri AdaBoost
     n_estimators: int = 300
     learning_rate: float = 0.1
-    algorithm: str = "SAMME"  # probabilità più stabili
-    base_max_depth: int = 3     # stump (classico per AdaBoost)
-    # colonne da escludere (ID, testo libero, potenziale leakage)
+    algorithm: str = "SAMME"   # probabilità più stabili in binario
+    base_max_depth: int = 3    # stump (classico per AdaBoost)
+    # colonne da escludere
     drop_cols: Tuple[str, ...] = ("PassengerId", "Name", "Cabin")
     # logging
-    log_level: int = logging.INFO  # usa logging.DEBUG per massima verbosità
+    log_level: int = logging.INFO
 
 class AdaBoostCV:
     """
-    Wrapper compatto che:
-    - allena un AdaBoost con StratifiedKFold
-    - calcola metriche OOF (out-of-fold)
-    - permette di tracciare curve ROC e PR
-    - espone predict_proba / predict
-    - LOGGA ogni step per diagnosticare eventuali blocchi
+    - Allena AdaBoost con StratifiedKFold
+    - Tiene le proba OOF
+    - Ritorna un riassunto: accuracy media, std, confusion matrix OOF
     """
 
     def __init__(self, cfg: Optional[ConfigAdaBoost] = None):
@@ -56,15 +47,12 @@ class AdaBoostCV:
         self.models_: List[Pipeline] = []
         self.oof_proba_: Optional[np.ndarray] = None
         self.fold_indices_: List[np.ndarray] = []
-        # configura logging di default sulla base della cfg
         self.enable_logging(self.cfg.log_level)
-
         logger.debug("AdaBoostCV inizializzato con config: %s", self.cfg)
 
     # ------- Utils logging -------
     @staticmethod
     def enable_logging(level: int = logging.INFO):
-        """Configura il root logger se non già configurato."""
         root = logging.getLogger()
         if not root.handlers:
             logging.basicConfig(
@@ -98,8 +86,7 @@ class AdaBoostCV:
 
     # ---------------- PIPELINE ----------------
     def _make_pipeline(self, X: pd.DataFrame) -> Pipeline:
-        logger.debug("Creo pipeline. Dtypes numerici/categorici in X: %s",
-                     X.dtypes.value_counts().to_dict())
+        logger.debug("Creo pipeline. Dtypes: %s", X.dtypes.value_counts().to_dict())
         num_sel = selector(dtype_include=np.number)
         cat_sel = selector(dtype_include=object)
 
@@ -148,25 +135,17 @@ class AdaBoostCV:
         self.fold_indices_.clear()
         self.oof_proba_ = np.zeros(len(X), dtype=float)
 
-        # Alcuni warning (es. feature costanti dopo OHE) possono confondere: li mostriamo come info
         with warnings.catch_warnings(record=True) as wlist:
             warnings.simplefilter("always")
             for fold, (tr_idx, va_idx) in enumerate(skf.split(X, y), start=1):
                 logger.info("-- Fold %d/%d: train=%d, valid=%d",
                             fold, self.cfg.n_splits, len(tr_idx), len(va_idx))
-                logger.debug("Class balance TRAIN: %s", self._class_balance(y.iloc[tr_idx]))
-                logger.debug("Class balance VALID: %s", self._class_balance(y.iloc[va_idx]))
-
                 try:
                     t_fold = time.perf_counter()
                     pipe = self._make_pipeline(X)
-                    logger.debug("Inizio fit pipeline (fold %d)...", fold)
                     pipe.fit(X.iloc[tr_idx], y.iloc[tr_idx])
-                    logger.debug("Fine fit pipeline (fold %d) in %.3fs",
-                                 fold, time.perf_counter() - t_fold)
-
-                    logger.debug("Calcolo predict_proba (fold %d)...", fold)
                     proba = pipe.predict_proba(X.iloc[va_idx])[:, 1]
+
                     if np.any(~np.isfinite(proba)):
                         logger.warning("Probabilità non finite rilevate nel fold %d.", fold)
 
@@ -174,99 +153,54 @@ class AdaBoostCV:
                     self.models_.append(pipe)
                     self.fold_indices_.append(va_idx)
                     logger.info("Fold %d completato in %.3fs", fold, time.perf_counter() - t_fold)
-
                 except Exception as e:
                     logger.exception("Errore nel fold %d: %s", fold, str(e))
-                    raise  # rialza per evidenziare esattamente il punto di rottura
+                    raise
 
-            # Logghiamo eventuali warning catturati
             for w in wlist:
                 logger.warning("Warning catturato durante fit: %s: %s", w.category.__name__, str(w.message))
 
         logger.info("== Fit completato in %.3fs ==", time.perf_counter() - t0)
         return self
 
-    # ---------------- METRICHE ----------------
-    @staticmethod
-    def _metrics(y_true: np.ndarray, proba: np.ndarray, thr: float = 0.5) -> Dict[str, Any]:
-        y_hat = (proba >= thr).astype(int)
-        tn, fp, fn, tp = confusion_matrix(y_true, y_hat).ravel()
-        out = {
-            "threshold": thr,
-            "confusion_matrix": {"tn": int(tn), "fp": int(fp), "fn": int(fn), "tp": int(tp)},
-            "accuracy": float(accuracy_score(y_true, y_hat)),
-            "precision": float(precision_score(y_true, y_hat, zero_division=0)),
-            "recall": float(recall_score(y_true, y_hat, zero_division=0)),
-            "f1": float(f1_score(y_true, y_hat, zero_division=0)),
-            "roc_auc": float(roc_auc_score(y_true, proba)),
-            "pr_auc": float(average_precision_score(y_true, proba)),
-        }
-        logger.debug("Metriche calcolate: %s", out)
-        return out
-
-    def oof_metrics(self, df: pd.DataFrame, threshold: float = 0.5) -> Dict[str, Any]:
-        if self.oof_proba_ is None:
-            logger.error("oof_metrics chiamato prima di fit().")
-            raise RuntimeError("Chiama fit() prima.")
-        _, y = self._split_X_y(df)
-        logger.info("Calcolo metriche OOF con threshold=%.3f", threshold)
-        return self._metrics(y.values, self.oof_proba_, threshold)
-
-    def per_fold_metrics(self, df: pd.DataFrame, threshold: float = 0.5) -> List[Dict[str, Any]]:
+    # ---------------- RIASSUNTO METRICHE ----------------
+    def summary_metrics(self, df: pd.DataFrame, threshold: float = 0.5) -> Dict[str, Any]:
+        """
+        Ritorna:
+          - 'accuracy_mean': media dell'accuratezza sui fold
+          - 'accuracy_std': deviazione standard campionaria (ddof=1) dell'accuratezza sui fold
+          - 'confusion_matrix': dict {tn, fp, fn, tp} calcolata OOF con il threshold dato
+        """
         if self.oof_proba_ is None or not self.fold_indices_:
-            logger.error("per_fold_metrics chiamato prima di fit().")
+            logger.error("summary_metrics chiamato prima di fit().")
             raise RuntimeError("Chiama fit() prima.")
+
         _, y = self._split_X_y(df)
-        out = []
-        for i, va_idx in enumerate(self.fold_indices_, 1):
-            m = self._metrics(y.iloc[va_idx].values, self.oof_proba_[va_idx], threshold)
-            m["fold"] = i
-            m["support"] = int(len(va_idx))
-            out.append(m)
-        logger.info("Metriche per fold calcolate (%d folds).", len(out))
+        y = y.values
+
+        # accuracy per fold
+        fold_acc = []
+        for va_idx in self.fold_indices_:
+            y_hat_fold = (self.oof_proba_[va_idx] >= threshold).astype(int)
+            acc_fold = (y[va_idx] == y_hat_fold).mean()
+            fold_acc.append(acc_fold)
+
+        acc_mean = float(np.mean(fold_acc))
+        acc_std = float(np.std(fold_acc, ddof=1)) if len(fold_acc) > 1 else 0.0
+
+        # confusion matrix OOF complessiva
+        y_hat = (self.oof_proba_ >= threshold).astype(int)
+        tn, fp, fn, tp = confusion_matrix(y, y_hat).ravel()
+
+        out = {
+            "n_splits": self.cfg.n_splits,
+            "threshold": threshold,
+            "accuracy_mean": acc_mean,
+            "accuracy_std": acc_std,
+            "confusion_matrix": {"tn": int(tn), "fp": int(fp), "fn": int(fn), "tp": int(tp)},
+        }
+        logger.info("Summary metriche: %s", out)
         return out
-
-    # ---------------- CURVE ----------------
-    def plot_oof_roc(self, df: pd.DataFrame, save_path: Optional[str] = None) -> float:
-        if self.oof_proba_ is None:
-            logger.error("plot_oof_roc chiamato prima di fit().")
-            raise RuntimeError("Chiama fit() prima.")
-        _, y = self._split_X_y(df)
-        fpr, tpr, _ = roc_curve(y, self.oof_proba_)
-        auc = roc_auc_score(y, self.oof_proba_)
-        plt.figure()
-        plt.plot(fpr, tpr, label=f"AUC={auc:.4f}")
-        plt.plot([0, 1], [0, 1], linestyle="--")
-        plt.xlabel("False Positive Rate")
-        plt.ylabel("True Positive Rate")
-        plt.title("ROC OOF - AdaBoost")
-        plt.legend()
-        if save_path:
-            plt.savefig(save_path, bbox_inches="tight")
-            logger.info("ROC salvata in %s", save_path)
-        plt.close()
-        logger.debug("AUC ROC OOF=%.6f", auc)
-        return float(auc)
-
-    def plot_oof_pr(self, df: pd.DataFrame, save_path: Optional[str] = None) -> float:
-        if self.oof_proba_ is None:
-            logger.error("plot_oof_pr chiamato prima di fit().")
-            raise RuntimeError("Chiama fit() prima.")
-        _, y = self._split_X_y(df)
-        prec, rec, _ = precision_recall_curve(y, self.oof_proba_)
-        ap = average_precision_score(y, self.oof_proba_)
-        plt.figure()
-        plt.plot(rec, prec, label=f"AP={ap:.4f}")
-        plt.xlabel("Recall")
-        plt.ylabel("Precision")
-        plt.title("Precision–Recall OOF - AdaBoost")
-        plt.legend()
-        if save_path:
-            plt.savefig(save_path, bbox_inches="tight")
-            logger.info("PR salvata in %s", save_path)
-        plt.close()
-        logger.debug("AP PR OOF=%.6f", ap)
-        return float(ap)
 
     # ---------------- INFERENZA ----------------
     def predict_proba(self, df: pd.DataFrame) -> np.ndarray:
