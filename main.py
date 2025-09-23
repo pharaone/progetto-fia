@@ -9,10 +9,6 @@ from randomforest import RandomForestCV
 
 
 def plot_confusion_from_dict(cm_dict, title, save_path):
-    """
-    cm_dict deve essere un dict con chiavi: tn, fp, fn, tp.
-    Crea e salva un grafico di confusion matrix.
-    """
     tn = cm_dict["tn"]
     fp = cm_dict["fp"]
     fn = cm_dict["fn"]
@@ -38,20 +34,27 @@ def main():
 
     # 2) preprocess
     dataset_p = preprocess_dataset(df)
-
     print(dataset_p.head())
-
     dataset_p.to_csv('my_file.csv', index=False)
 
-    # 3) addestra i modelli
-    rf = RandomForestCV().fit(dataset_p)
+    # 3) Hyperparameter tuning RandomForest
+    rf = RandomForestCV()
+    print("Esecuzione tuning iperparametri RandomForest...")
+    best_params = rf.tune_hyperparameters(dataset_p, cv=3)
+    print("Migliori parametri RandomForest:", best_params)
+
+    # 4) Fit finale sui fold
+    print("Fit finale RandomForest con parametri ottimali...")
+    rf.fit(dataset_p)
+
+    # 5) AdaBoost fit
     ada = AdaBoostCV().fit(dataset_p)
 
-    # 4) riassunti metriche (richiede che entrambe le classi abbiano summary_metrics)
+    # 6) Riassunti metriche
     rf_sum = rf.summary_metrics(dataset_p, threshold=THRESHOLD)
     ada_sum = ada.summary_metrics(dataset_p, threshold=THRESHOLD)
 
-    # 5) grafici confusion matrix
+    # 7) Grafici confusion matrix
     plot_confusion_from_dict(
         rf_sum["confusion_matrix"],
         title=f"Confusion Matrix - RandomForest (thr={THRESHOLD})",
@@ -63,7 +66,7 @@ def main():
         save_path="confusion_adaboost.png",
     )
 
-    # 6) CSV con accuracy mean/std
+    # 8) CSV con accuracy mean/std
     rows = [
         {
             "model": "RandomForest",

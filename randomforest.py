@@ -1,4 +1,3 @@
-# random_forest_kfold_min.py
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional, Tuple
@@ -12,6 +11,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import confusion_matrix
+from sklearn.model_selection import GridSearchCV
 
 
 @dataclass
@@ -93,7 +93,6 @@ class RandomForestCV:
         self.fold_indices_.clear()
         self.oof_proba_ = np.zeros(len(X), dtype=float)
 
-        # Trova le colonne numeriche
         numeric_cols = X.select_dtypes(include=[np.number]).columns.tolist()
 
         for tr_idx, va_idx in skf.split(X, y):
@@ -122,19 +121,12 @@ class RandomForestCV:
 
     # --- riassunto richiesto ---
     def summary_metrics(self, df: pd.DataFrame, threshold: float = 0.5) -> Dict[str, Any]:
-        """
-        Ritorna un dict con:
-          - 'accuracy_mean': media dell'accuratezza sui fold
-          - 'accuracy_std': deviazione standard (campionaria) dell'accuratezza sui fold
-          - 'confusion_matrix': dict {tn, fp, fn, tp} calcolata OOF con il threshold dato
-        """
         if self.oof_proba_ is None or not self.fold_indices_:
             raise RuntimeError("Chiama fit() prima.")
 
         _, y = self._split_X_y(df)
         y = y.values
 
-        # accuracy per fold
         fold_acc = []
         for va_idx in self.fold_indices_:
             y_hat_fold = (self.oof_proba_[va_idx] >= threshold).astype(int)
@@ -143,10 +135,7 @@ class RandomForestCV:
 
         acc_mean = float(np.mean(fold_acc))
         acc_std = float(np.std(fold_acc, ddof=1)) if len(fold_acc) > 1 else 0.0
-
-        # confusion matrix OOF complessiva
-        y_hat = (self.oof_proba_ >= threshold).astype(int)
-        tn, fp, fn, tp = confusion_matrix(y, y_hat).ravel()
+        tn, fp, fn, tp = confusion_matrix(y, (self.oof_proba_ >= threshold).astype(int)).ravel()
 
         return {
             "n_splits": self.cfg.n_splits,
@@ -155,3 +144,46 @@ class RandomForestCV:
             "accuracy_std": acc_std,
             "confusion_matrix": {"tn": int(tn), "fp": int(fp), "fn": int(fn), "tp": int(tp)},
         }
+
+    # --- hyperparameter tuning ---
+    def tune_hyperparameters(
+        self,
+        df: pd.DataFrame,
+        param_grid: Optional[Dict[str, list]] = None,
+        cv: int = 3,
+        scoring: str = "accuracy",
+    ) -> Dict[str, Any]:
+        X, y = self._split_X_y(df)
+
+        if param_grid is None:
+            param_grid = {
+                "rf__n_estimators": [100, 300, 500],
+                "rf__max_depth": [None, 10, 20, 30],
+                "rf__max_features": ["sqrt", "log2", 0.5],
+                "rf__class_weight": [None, "balanced"]
+            }
+
+        numeric_cols = X.select_dtypes(include=[np.number]).columns.tolist()
+        scaler = StandardScaler()
+        X_scaled = X.copy()
+        X_scaled[numeric_cols] = scaler.fit_transform(X_scaled[numeric_cols])
+
+        pipe = self._make_pipeline(X_scaled)
+
+        grid = GridSearchCV(
+            estimator=pipe,
+            param_grid=param_grid,
+            scoring=scoring,
+            cv=cv,
+            n_jobs=-1,
+            verbose=2
+        )
+        grid.fit(X_scaled, y)
+
+        best_params = grid.best_params_
+        # aggiorna configurazione interna
+        for key, val in best_params.items():
+            if key.startswith("rf__"):
+                setattr(self.cfg, key[4:], val)
+
+        return best_params
