@@ -130,7 +130,6 @@ def remove_highly_correlated(df: pd.DataFrame, threshold: float = 0.9,save_corr_
 def preprocess_dataset(df: pd.DataFrame) -> pd.DataFrame:
     df = encode_booleans(df)
     df = add_group_features(df)
-    df = add_lastname_feature(df)
     df = add_cabin_features(df)
     df = add_expense_features(df)
     df = encode_categoricals(df)
@@ -139,6 +138,6 @@ def preprocess_dataset(df: pd.DataFrame) -> pd.DataFrame:
     df = knn_impute_sklearn(df)
     # Rimuovo feature altamente correlate
     df = remove_highly_correlated(df, threshold=0.8)
-    df = df.drop(columns=["Name", "Lastname"]) #verificato che non danno nulla
+    df = df.drop(columns=["Name"]) #verificato che non danno nulla
 
     return df

@@ -66,7 +66,14 @@ def main():
         save_path="confusion_adaboost.png",
     )
 
-    # 8) CSV con accuracy mean/std
+    # 6) CSV con accuracy mean/std
+    def _safe_sem(summary: dict) -> float:
+        if "accuracy_sem" in summary and summary["accuracy_sem"] is not None:
+            return float(summary["accuracy_sem"])
+        n = int(summary.get("n_splits", 0))
+        std = float(summary.get("accuracy_std", 0.0))
+        return float(std / np.sqrt(n)) if n and n > 1 else 0.0
+
     rows = [
         {
             "model": "RandomForest",
@@ -74,6 +81,7 @@ def main():
             "threshold": rf_sum["threshold"],
             "accuracy_mean": rf_sum["accuracy_mean"],
             "accuracy_std": rf_sum["accuracy_std"],
+            "accuracy_sem": _safe_sem(rf_sum),
         },
         {
             "model": "AdaBoost",
@@ -81,6 +89,7 @@ def main():
             "threshold": ada_sum["threshold"],
             "accuracy_mean": ada_sum["accuracy_mean"],
             "accuracy_std": ada_sum["accuracy_std"],
+            "accuracy_sem": _safe_sem(ada_sum),
         },
     ]
     pd.DataFrame(rows).to_csv("metrics_summary.csv", index=False)
