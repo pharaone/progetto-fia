@@ -39,6 +39,10 @@ def main():
     # 2) preprocess
     dataset_p = preprocess_dataset(df)
 
+    print(dataset_p.head())
+
+    dataset_p.to_csv('my_file.csv', index=False)
+
     # 3) addestra i modelli
     rf = RandomForestCV().fit(dataset_p)
     ada = AdaBoostCV().fit(dataset_p)

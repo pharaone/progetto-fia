@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ConfigAdaBoost:
     """Configurazione base per AdaBoost + K-Fold con logging."""
-    n_splits: int = 5
+    n_splits: int = 10
     random_state: int = 42
     shuffle: bool = True
     # Parametri AdaBoost

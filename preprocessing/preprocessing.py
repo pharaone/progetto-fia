@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
+import seaborn as sns
+from matplotlib import pyplot as plt
+from sklearn.preprocessing import OneHotEncoder
 from sklearn.impute import KNNImputer
 
 
@@ -21,6 +23,7 @@ def add_group_features(df: pd.DataFrame) -> pd.DataFrame:
 
 def add_lastname_feature(df: pd.DataFrame) -> pd.DataFrame:
     df['Lastname'] = df['Name'].str.split().str[-1]
+    df['Name']= df['Name'].str.rsplit(n=1).str[0]
     return df
 
 
@@ -102,13 +105,25 @@ def encode_categoricals(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def remove_highly_correlated(df: pd.DataFrame, threshold: float = 0.9) -> pd.DataFrame:
+def remove_highly_correlated(df: pd.DataFrame, threshold: float = 0.9,save_corr_plot: str = "correlation_matrix.png") -> pd.DataFrame:
     numeric_cols = df.select_dtypes(include=[np.number]).columns
     corr_matrix = df[numeric_cols].corr().abs()
+
+    # Salva la heatmap della correlazione
+    plt.figure(figsize=(12, 10))
+    sns.heatmap(corr_matrix, annot=True, fmt=".2f", cmap="coolwarm", cbar=True)
+    plt.title("Correlation Matrix")
+    plt.tight_layout()
+    plt.savefig(save_corr_plot, dpi=300)
+    plt.close()
+
+    # Rimuovi feature troppo correlate
     upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
     to_drop = [col for col in upper.columns if any(upper[col] > threshold)]
-    df = df.drop(columns=to_drop)
-    return df
+    df_reduced = df.drop(columns=to_drop)
+
+    print(f"Feature rimosse (correlazione > {threshold}): {to_drop}")
+    return df_reduced
 
 
 
@@ -122,8 +137,8 @@ def preprocess_dataset(df: pd.DataFrame) -> pd.DataFrame:
     df = df.drop(columns=["PassengerId"])
 
     df = knn_impute_sklearn(df)
-
     # Rimuovo feature altamente correlate
-    df = remove_highly_correlated(df, threshold=0.9)
+    df = remove_highly_correlated(df, threshold=0.8)
+    df = df.drop(columns=["Name", "Lastname"]) #verificato che non danno nulla
 
     return df
