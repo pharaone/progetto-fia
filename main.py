@@ -37,15 +37,15 @@ def main():
     df = pd.read_csv("input.csv")
 
     # 2) preprocess
-    train_p = preprocess_dataset(df)
+    dataset_p = preprocess_dataset(df)
 
     # 3) addestra i modelli
-    rf = RandomForestCV().fit(train_p)
-    ada = AdaBoostCV().fit(train_p)
+    rf = RandomForestCV().fit(dataset_p)
+    ada = AdaBoostCV().fit(dataset_p)
 
     # 4) riassunti metriche (richiede che entrambe le classi abbiano summary_metrics)
-    rf_sum = rf.summary_metrics(train_p, threshold=THRESHOLD)
-    ada_sum = ada.summary_metrics(train_p, threshold=THRESHOLD)
+    rf_sum = rf.summary_metrics(dataset_p, threshold=THRESHOLD)
+    ada_sum = ada.summary_metrics(dataset_p, threshold=THRESHOLD)
 
     # 5) grafici confusion matrix
     plot_confusion_from_dict(

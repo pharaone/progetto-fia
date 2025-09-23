@@ -119,13 +119,11 @@ def preprocess_dataset(df: pd.DataFrame) -> pd.DataFrame:
     df = add_cabin_features(df)
     df = add_expense_features(df)
     df = encode_categoricals(df)
+    df = df.drop(columns=["PassengerId"])
 
-    numeric_discrete_cols = ['Group_size', 'Cabin_region']
     df = knn_impute_sklearn(df)
 
     # Rimuovo feature altamente correlate
     df = remove_highly_correlated(df, threshold=0.9)
 
     return df
-
-##stardardizzazione dopo lo split

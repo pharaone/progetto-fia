@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 from sklearn.compose import ColumnTransformer, make_column_selector as selector
-from sklearn.preprocessing import OneHotEncoder
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
 from sklearn.ensemble import RandomForestClassifier
@@ -88,14 +88,32 @@ class RandomForestCV:
             shuffle=self.cfg.shuffle,
             random_state=self.cfg.random_state
         )
+
         self.models_.clear()
         self.fold_indices_.clear()
         self.oof_proba_ = np.zeros(len(X), dtype=float)
 
+        # Trova le colonne numeriche
+        numeric_cols = X.select_dtypes(include=[np.number]).columns.tolist()
+
         for tr_idx, va_idx in skf.split(X, y):
-            pipe = self._make_pipeline(X)
-            pipe.fit(X.iloc[tr_idx], y.iloc[tr_idx])
-            proba = pipe.predict_proba(X.iloc[va_idx])[:, 1]
+            # Standardizzazione training set
+            scaler = StandardScaler()
+            X_train_scaled = X.iloc[tr_idx].copy()
+            X_train_scaled[numeric_cols] = scaler.fit_transform(X_train_scaled[numeric_cols])
+
+            # Standardizzazione validation set con media/varianza del training set
+            X_valid_scaled = X.iloc[va_idx].copy()
+            X_valid_scaled[numeric_cols] = scaler.transform(X_valid_scaled[numeric_cols])
+
+            # Creazione pipeline e training
+            pipe = self._make_pipeline(X_train_scaled)
+            pipe.fit(X_train_scaled, y.iloc[tr_idx])
+
+            # Predizione sul validation set
+            proba = pipe.predict_proba(X_valid_scaled)[:, 1]
+
+            # Salvataggio risultati
             self.oof_proba_[va_idx] = proba
             self.models_.append(pipe)
             self.fold_indices_.append(va_idx)

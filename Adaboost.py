@@ -9,7 +9,7 @@ import time
 import warnings
 
 from sklearn.compose import ColumnTransformer, make_column_selector as selector
-from sklearn.preprocessing import OneHotEncoder
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
 from sklearn.ensemble import AdaBoostClassifier
@@ -26,7 +26,7 @@ class ConfigAdaBoost:
     random_state: int = 42
     shuffle: bool = True
     # Parametri AdaBoost
-    n_estimators: int = 300
+    n_estimators: int = 150
     learning_rate: float = 0.1
     algorithm: str = "SAMME"   # probabilità più stabili in binario
     base_max_depth: int = 3    # stump (classico per AdaBoost)
@@ -135,6 +135,8 @@ class AdaBoostCV:
         self.fold_indices_.clear()
         self.oof_proba_ = np.zeros(len(X), dtype=float)
 
+        numeric_cols = X.select_dtypes(include=[np.number]).columns.tolist()
+
         with warnings.catch_warnings(record=True) as wlist:
             warnings.simplefilter("always")
             for fold, (tr_idx, va_idx) in enumerate(skf.split(X, y), start=1):
@@ -142,9 +144,22 @@ class AdaBoostCV:
                             fold, self.cfg.n_splits, len(tr_idx), len(va_idx))
                 try:
                     t_fold = time.perf_counter()
-                    pipe = self._make_pipeline(X)
-                    pipe.fit(X.iloc[tr_idx], y.iloc[tr_idx])
-                    proba = pipe.predict_proba(X.iloc[va_idx])[:, 1]
+
+                    # Standardizzazione training set
+                    scaler = StandardScaler()
+                    X_train_scaled = X.iloc[tr_idx].copy()
+                    X_train_scaled[numeric_cols] = scaler.fit_transform(X_train_scaled[numeric_cols])
+
+                    # Standardizzazione validation set con la stessa media/varianza del train
+                    X_valid_scaled = X.iloc[va_idx].copy()
+                    X_valid_scaled[numeric_cols] = scaler.transform(X_valid_scaled[numeric_cols])
+
+                    # Creazione pipeline
+                    pipe = self._make_pipeline(X_train_scaled)
+                    pipe.fit(X_train_scaled, y.iloc[tr_idx])
+
+                    # Predizione sul validation set
+                    proba = pipe.predict_proba(X_valid_scaled)[:, 1]
 
                     if np.any(~np.isfinite(proba)):
                         logger.warning("Probabilità non finite rilevate nel fold %d.", fold)
@@ -162,7 +177,6 @@ class AdaBoostCV:
 
         logger.info("== Fit completato in %.3fs ==", time.perf_counter() - t0)
         return self
-
     # ---------------- RIASSUNTO METRICHE ----------------
     def summary_metrics(self, df: pd.DataFrame, threshold: float = 0.5) -> Dict[str, Any]:
         """
