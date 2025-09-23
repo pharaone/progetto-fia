@@ -54,21 +54,7 @@ class RandomForestCV:
             X = X.drop(columns=drop)
         return X, y
 
-    def _make_pipeline(self, X: pd.DataFrame) -> Pipeline:
-        num_sel = selector(dtype_include=np.number)
-        cat_sel = selector(dtype_include=object)
-
-        pre = ColumnTransformer(
-            transformers=[
-                ("num", SimpleImputer(strategy="median"), num_sel),
-                ("cat", Pipeline([
-                    ("imp", SimpleImputer(strategy="most_frequent")),
-                    ("oh", OneHotEncoder(handle_unknown="ignore", sparse_output=False)),
-                ]), cat_sel),
-            ],
-            remainder="drop",
-            verbose_feature_names_out=False,
-        )
+    def _make_pipeline(self) -> Pipeline:
 
         rf = RandomForestClassifier(
             n_estimators=self.cfg.n_estimators,
@@ -78,7 +64,7 @@ class RandomForestCV:
             class_weight=self.cfg.class_weight,
             random_state=self.cfg.random_state,
         )
-        return Pipeline([("pre", pre), ("rf", rf)])
+        return Pipeline([("rf", rf)])
 
     # --- training ---
     def fit(self, df: pd.DataFrame) -> "RandomForestCV":
@@ -106,7 +92,7 @@ class RandomForestCV:
             X_valid_scaled[numeric_cols] = scaler.transform(X_valid_scaled[numeric_cols])
 
             # Creazione pipeline e training
-            pipe = self._make_pipeline(X_train_scaled)
+            pipe = self._make_pipeline()
             pipe.fit(X_train_scaled, y.iloc[tr_idx])
 
             # Predizione sul validation set
@@ -168,7 +154,7 @@ class RandomForestCV:
         X_scaled = X.copy()
         X_scaled[numeric_cols] = scaler.fit_transform(X_scaled[numeric_cols])
 
-        pipe = self._make_pipeline(X_scaled)
+        pipe = self._make_pipeline()
 
         grid = GridSearchCV(
             estimator=pipe,

@@ -85,23 +85,7 @@ class AdaBoostCV:
         return X, y
 
     # ---------------- PIPELINE ----------------
-    def _make_pipeline(self, X: pd.DataFrame) -> Pipeline:
-        logger.debug("Creo pipeline. Dtypes: %s", X.dtypes.value_counts().to_dict())
-        num_sel = selector(dtype_include=np.number)
-        cat_sel = selector(dtype_include=object)
-
-        pre = ColumnTransformer(
-            transformers=[
-                ("num", SimpleImputer(strategy="median"), num_sel),
-                ("cat", Pipeline([
-                    ("imp", SimpleImputer(strategy="most_frequent")),
-                    ("oh", OneHotEncoder(handle_unknown="ignore", sparse_output=False)),
-                ]), cat_sel),
-            ],
-            remainder="drop",
-            verbose_feature_names_out=False,
-        )
-
+    def _make_pipeline(self) -> Pipeline:
         base_tree = DecisionTreeClassifier(
             max_depth=self.cfg.base_max_depth,
             random_state=self.cfg.random_state
@@ -113,7 +97,7 @@ class AdaBoostCV:
             algorithm=self.cfg.algorithm,
             random_state=self.cfg.random_state
         )
-        pipe = Pipeline([("pre", pre), ("clf", ada)])
+        pipe = Pipeline([("clf", ada)])
         logger.debug("Pipeline creata.")
         return pipe
 
@@ -155,7 +139,7 @@ class AdaBoostCV:
                     X_valid_scaled[numeric_cols] = scaler.transform(X_valid_scaled[numeric_cols])
 
                     # Creazione pipeline
-                    pipe = self._make_pipeline(X_train_scaled)
+                    pipe = self._make_pipeline()
                     pipe.fit(X_train_scaled, y.iloc[tr_idx])
 
                     # Predizione sul validation set
