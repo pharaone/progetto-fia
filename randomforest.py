@@ -133,11 +133,11 @@ class RandomForestCV:
 
     # --- hyperparameter tuning ---
     def tune_hyperparameters(
-        self,
-        df: pd.DataFrame,
-        param_grid: Optional[Dict[str, list]] = None,
-        cv: int = 3,
-        scoring: str = "accuracy",
+            self,
+            df: pd.DataFrame,
+            param_grid: Optional[Dict[str, list]] = None,
+            cv: int = 3,
+            scoring: str = "accuracy",
     ) -> Dict[str, Any]:
         X, y = self._split_X_y(df)
 
@@ -149,13 +149,32 @@ class RandomForestCV:
                 "rf__class_weight": [None, "balanced"]
             }
 
+        # Creiamo una pipeline temporanea con StandardScaler
         numeric_cols = X.select_dtypes(include=[np.number]).columns.tolist()
-        scaler = StandardScaler()
-        X_scaled = X.copy()
-        X_scaled[numeric_cols] = scaler.fit_transform(X_scaled[numeric_cols])
 
-        pipe = self._make_pipeline()
+        # ColumnTransformer per scalare solo le colonne numeriche
+        preprocessor = ColumnTransformer(
+            transformers=[
+                ("num", StandardScaler(), numeric_cols)
+            ],
+            remainder="passthrough"  # lascia inalterate le altre colonne
+        )
 
+        # Pipeline completa: preprocessor + RandomForest
+        rf = RandomForestClassifier(
+            n_estimators=self.cfg.n_estimators,
+            max_depth=self.cfg.max_depth,
+            max_features=self.cfg.max_features,
+            n_jobs=self.cfg.n_jobs,
+            class_weight=self.cfg.class_weight,
+            random_state=self.cfg.random_state,
+        )
+        pipe = Pipeline([
+            ("preprocessor", preprocessor),
+            ("rf", rf)
+        ])
+
+        # GridSearchCV
         grid = GridSearchCV(
             estimator=pipe,
             param_grid=param_grid,
@@ -164,10 +183,10 @@ class RandomForestCV:
             n_jobs=-1,
             verbose=2
         )
-        grid.fit(X_scaled, y)
+        grid.fit(X, y)
 
+        # Aggiorna self.cfg solo con i parametri trovati
         best_params = grid.best_params_
-        # aggiorna configurazione interna
         for key, val in best_params.items():
             if key.startswith("rf__"):
                 setattr(self.cfg, key[4:], val)
