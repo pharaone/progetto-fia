@@ -43,6 +43,8 @@ def add_cabin_features(df: pd.DataFrame, drop_original: bool = True) -> pd.DataF
 
     if drop_original:
         df = df.drop(columns=['Cabin'])
+
+    df = df.drop(columns=['Deck', 'CabinNum', 'Side'])
     return df
 
 
@@ -58,59 +60,23 @@ def add_expense_features(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def knn_impute(df: pd.DataFrame, discrete_cols: list = None, n_neighbors: int = 15) -> pd.DataFrame:
+def knn_impute_sklearn(df: pd.DataFrame, n_neighbors: int = 15) -> pd.DataFrame:
+    """
+    Versione semplificata: usa direttamente sklearn.impute.KNNImputer
+    """
     df = df.copy().replace({pd.NA: np.nan})
     exclude_cols = ["Transported", "PassengerId"]
 
-    dummy_cols = [
-        c for c in df.columns
-        if c not in exclude_cols
-           and df[c].dropna().isin([0, 1]).all()
-           and df[c].dtype in ["int64", "float64"]
-    ]
+    numeric_cols = df.drop(columns=exclude_cols, errors="ignore").select_dtypes(include=[np.number]).columns
 
-    numeric_cols = (
-        df.drop(columns=exclude_cols + dummy_cols, errors="ignore")
-        .select_dtypes(include=[np.number])
-        .columns.tolist()
-    )
-
-    mask_nan = df[numeric_cols].isna()
-    scaler = StandardScaler()
-    scaler.fit(df[numeric_cols].dropna())
-    df_scaled_numeric = pd.DataFrame(
-        scaler.transform(df[numeric_cols]),
-        columns=numeric_cols,
-        index=df.index
-    )
-
-    df_for_impute = pd.concat([df_scaled_numeric, df[dummy_cols]], axis=1)
     imputer = KNNImputer(n_neighbors=n_neighbors)
-    df_imputed_scaled = pd.DataFrame(imputer.fit_transform(df_for_impute), columns=df_for_impute.columns,
-                                     index=df.index)
+    df[numeric_cols] = imputer.fit_transform(df[numeric_cols])
 
-    df_imputed_numeric = df[numeric_cols].copy()
-    for col in numeric_cols:
-        rows_nan = mask_nan[col]
-        if rows_nan.any():
-            vals_scaled = df_imputed_scaled.loc[rows_nan, col].values.reshape(-1, 1)
-            vals_orig_scale = scaler.inverse_transform(
-                np.column_stack([vals_scaled if c == col else np.zeros_like(vals_scaled) for c in numeric_cols])
-            )[:, numeric_cols.index(col)]
-            df_imputed_numeric.loc[rows_nan, col] = vals_orig_scale
-
-    df_final = df.copy()
-    df_final[numeric_cols] = df_imputed_numeric
-
-    if discrete_cols is not None:
-        for col in discrete_cols:
-            if col in df_final.columns:
-                df_final[col] = df_final[col].round().astype("Int64")
-    return df_final
+    return df
 
 
-def encode_categoricals(df: pd.DataFrame, train_mask: pd.Series) -> pd.DataFrame:
-    categorical = ['Deck', 'HomePlanet', 'Destination', 'Side', 'Cabin_region']
+def encode_categoricals(df: pd.DataFrame) -> pd.DataFrame:
+    categorical = ['HomePlanet', 'Destination', 'Cabin_region']
 
     for col in categorical:
         if col in df.columns:
@@ -121,7 +87,7 @@ def encode_categoricals(df: pd.DataFrame, train_mask: pd.Series) -> pd.DataFrame
 
     # OneHotEncoder
     encoder = OneHotEncoder(handle_unknown="ignore", sparse_output=False, drop="first")
-    encoder.fit(df.loc[train_mask, categorical])
+    encoder.fit(df[categorical])
 
     encoded_array = encoder.transform(df[categorical])
     encoded_df = pd.DataFrame(
@@ -136,8 +102,6 @@ def encode_categoricals(df: pd.DataFrame, train_mask: pd.Series) -> pd.DataFrame
     return df
 
 
-
-
 def remove_highly_correlated(df: pd.DataFrame, threshold: float = 0.9) -> pd.DataFrame:
     numeric_cols = df.select_dtypes(include=[np.number]).columns
     corr_matrix = df[numeric_cols].corr().abs()
@@ -148,22 +112,20 @@ def remove_highly_correlated(df: pd.DataFrame, threshold: float = 0.9) -> pd.Dat
 
 
 
-def preprocess_dataset(df: pd.DataFrame, train_mask: pd.Series = None) -> pd.DataFrame:
+def preprocess_dataset(df: pd.DataFrame) -> pd.DataFrame:
     df = encode_booleans(df)
     df = add_group_features(df)
     df = add_lastname_feature(df)
     df = add_cabin_features(df)
     df = add_expense_features(df)
+    df = encode_categoricals(df)
 
-    # Imputazione KNN (numeriche + dummy)
-    numeric_discrete_cols = ['Group_size', 'CabinNum']
-    df = knn_impute(df, discrete_cols=numeric_discrete_cols)
-
-    # Codifica categoriche con OHE
-    if train_mask is not None:
-        df = encode_categoricals(df, train_mask)
+    numeric_discrete_cols = ['Group_size', 'Cabin_region']
+    df = knn_impute_sklearn(df)
 
     # Rimuovo feature altamente correlate
     df = remove_highly_correlated(df, threshold=0.9)
 
     return df
+
+##stardardizzazione dopo lo split
