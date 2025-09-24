@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ConfigAdaBoost:
+    """Configurazione per AdaBoost + K-Fold."""
     n_splits: int = 10
     random_state: int = 42
     shuffle: bool = True
@@ -35,8 +36,8 @@ class ConfigAdaBoost:
 class AdaBoostCV:
     """
     - Allena AdaBoost con StratifiedKFold
-    - Tiene le proba OOF
-    - Ritorna un riassunto: accuracy media, std, confusion matrix OOF
+    - Salva OOF proba
+    - summary_metrics: accuracy media/std + confusion matrix OOF
     """
 
     def __init__(self, cfg: Optional[ConfigAdaBoost] = None):
@@ -49,11 +50,13 @@ class AdaBoostCV:
 
     @staticmethod
     def _class_balance(y: pd.Series) -> Dict[str, float]:
+        """Ritorna la distribuzione percentuale delle classi in y (come dict)."""
         vc = y.value_counts(normalize=True).to_dict()
         return {str(k): float(v) for k, v in vc.items()}
 
     # ---------------- SPLIT ----------------
     def _split_X_y(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
+        """Divide il dataframe in X e y, droppando eventuali colonne inutili."""
         logger.debug("Eseguo split X/y. Colonne disponibili: %s", list(df.columns))
         if "Transported" not in df.columns:
             logger.error("Manca la colonna target 'Transported'.")
@@ -70,6 +73,7 @@ class AdaBoostCV:
 
     # ---------------- PIPELINE ----------------
     def _make_pipeline(self) -> Pipeline:
+        """Crea la pipeline AdaBoost con base learner DecisionTree a profondità limitata."""
         base_tree = DecisionTreeClassifier(
             max_depth=self.cfg.base_max_depth,
             random_state=self.cfg.random_state
@@ -86,6 +90,7 @@ class AdaBoostCV:
 
     # ---------------- TRAIN ----------------
     def fit(self, df: pd.DataFrame) -> "AdaBoostCV":
+        """Esegue K-Fold: scaling per fold, fit AdaBoost, produce OOF proba."""
         t0 = time.perf_counter()
         logger.info("Inizio fit AdaBoostCV")
         X, y = self._split_X_y(df)
@@ -148,9 +153,9 @@ class AdaBoostCV:
     def summary_metrics(self, df: pd.DataFrame, threshold: float = 0.5) -> Dict[str, Any]:
         """
         Ritorna:
-          - 'accuracy_mean': media dell'accuratezza sui fold
-          - 'accuracy_std': deviazione standard campionaria (ddof=1) dell'accuratezza sui fold
-          - 'confusion_matrix': dict {tn, fp, fn, tp} calcolata OOF con il threshold dato
+          - 'accuracy_mean': media accuracy sui fold
+          - 'accuracy_std': deviazione standard campionaria (ddof=1)
+          - 'confusion_matrix': dict {tn, fp, fn, tp} su OOF al threshold dato
         """
         if self.oof_proba_ is None or not self.fold_indices_:
             logger.error("summary_metrics chiamato prima di fit().")
@@ -192,6 +197,7 @@ class AdaBoostCV:
         return out
 
     def predict_proba(self, df: pd.DataFrame) -> np.ndarray:
+        """Ensemble delle proba dei modelli dei vari fold (media)."""
         if not self.models_:
             logger.error("predict_proba chiamato prima di fit().")
             raise RuntimeError("Chiama fit() prima.")
@@ -213,6 +219,7 @@ class AdaBoostCV:
         return out
 
     def predict(self, df: pd.DataFrame, threshold: float = 0.5) -> np.ndarray:
+        """Predizione binaria applicando un threshold alle probabilità mediate."""
         logger.info("Predict con threshold=%.3f", threshold)
         return (self.predict_proba(df) >= threshold).astype(int)
     
@@ -225,9 +232,8 @@ class AdaBoostCV:
         scoring: str = "accuracy",
     ) -> Dict[str, Any]:
         """
-        Esegue una grid-search su AdaBoost (e profondità del base learner).
-        Aggiorna self.cfg con i migliori iperparametri trovati.
-        Ritorna: dict con best_params_ e best_score_.
+        GridSearchCV su AdaBoost (inclusa profondità del base learner).
+        Aggiorna self.cfg con i migliori iperparametri.
         """
         logger.info("== Inizio tuning iperparametri AdaBoost ==")
         X, y = self._split_X_y(df)
