@@ -6,6 +6,12 @@ from sklearn.metrics import ConfusionMatrixDisplay
 from Adaboost import AdaBoostCV
 from preprocessing.preprocessing import preprocess_dataset
 from randomforest import RandomForestCV
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
 
 
 def plot_confusion_from_dict(cm_dict, title, save_path):

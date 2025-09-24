@@ -44,6 +44,7 @@ class AdaBoostCV:
         self.models_: List[Pipeline] = []
         self.oof_proba_: Optional[np.ndarray] = None
         self.fold_indices_: List[np.ndarray] = []
+        logger.setLevel(self.cfg.log_level)
         logger.debug("AdaBoostCV inizializzato con config: %s", self.cfg)
 
     @staticmethod
