@@ -95,6 +95,7 @@ class AdaBoostCV:
         logger.info("Inizio fit AdaBoostCV")
         X, y = self._split_X_y(df)
 
+        # StratifiedKFold garantisce la stessa distribuzione di classi in train/valid
         skf = StratifiedKFold(
             n_splits=self.cfg.n_splits,
             shuffle=self.cfg.shuffle,
@@ -201,6 +202,8 @@ class AdaBoostCV:
         if not self.models_:
             logger.error("predict_proba chiamato prima di fit().")
             raise RuntimeError("Chiama fit() prima.")
+
+        # In inferenza la colonna target viene rimossa se presente
         X = df.drop(columns=[c for c in ("Transported",) if c in df.columns]).copy()
         drop = [c for c in self.cfg.drop_cols if c in X.columns]
         if drop:
@@ -209,11 +212,14 @@ class AdaBoostCV:
         logger.info("Inizio ensemble predict_proba su %d modelli. X shape=%s", len(self.models_), X.shape)
         t0 = time.perf_counter()
         probs = []
+
+        # Applica predict_proba di ciascun modello e accoda
         for i, m in enumerate(self.models_, 1):
             t = time.perf_counter()
             p = m.predict_proba(X)[:, 1]
             probs.append(p)
             logger.debug("Model %d predict_proba completato in %.3fs", i, time.perf_counter() - t)
+        # Ensemble come media semplice lungo l'asse dei modelli
         out = np.mean(np.vstack(probs), axis=0)
         logger.info("Ensemble completato in %.3fs", time.perf_counter() - t0)
         return out
