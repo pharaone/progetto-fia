@@ -21,6 +21,7 @@ def add_group_features(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+#non usata piu
 def add_lastname_feature(df: pd.DataFrame) -> pd.DataFrame:
     df['Lastname'] = df['Name'].str.split().str[-1]
     df['Name']= df['Name'].str.rsplit(n=1).str[0]
@@ -102,6 +103,11 @@ def encode_categoricals(df: pd.DataFrame) -> pd.DataFrame:
     df = df.drop(columns=categorical)
     df = pd.concat([df, encoded_df], axis=1)
 
+    # rimuovo le colonne che ho aggiunto se sono composte da tutti 0
+    for col in encoded_df.columns:
+        if "Unknown" in col and df[col].sum() == 0:
+            df = df.drop(columns=[col])
+
     return df
 
 
@@ -126,18 +132,16 @@ def remove_highly_correlated(df: pd.DataFrame, threshold: float = 0.9,save_corr_
     return df_reduced
 
 
-
 def preprocess_dataset(df: pd.DataFrame) -> pd.DataFrame:
     df = encode_booleans(df)
     df = add_group_features(df)
     df = add_cabin_features(df)
     df = add_expense_features(df)
-    df = encode_categoricals(df)
-    df = df.drop(columns=["PassengerId"])
 
     df = knn_impute_sklearn(df)
-    # Rimuovo feature altamente correlate
-    df = remove_highly_correlated(df, threshold=0.8)
-    df = df.drop(columns=["Name"]) #verificato che non danno nulla
 
+    df = encode_categoricals(df)
+    df = df.drop(columns=["PassengerId", "Name"], errors="ignore")
+
+    df = remove_highly_correlated(df, threshold=0.8)
     return df
