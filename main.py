@@ -94,6 +94,8 @@ def main():
             "threshold": rf_sum["threshold"],
             "accuracy_mean": rf_sum["accuracy_mean"],
             "accuracy_std": rf_sum["accuracy_std"],
+            "precision": rf_sum["precision"],
+            "specificity": rf_sum["specificity"],
             "accuracy_sem": _safe_sem(rf_sum),
         },
         {
@@ -102,6 +104,8 @@ def main():
             "threshold": ada_sum["threshold"],
             "accuracy_mean": ada_sum["accuracy_mean"],
             "accuracy_std": ada_sum["accuracy_std"],
+            "precision": ada_sum["precision"],
+            "specificity": ada_sum["specificity"],
             "accuracy_sem": _safe_sem(ada_sum),
         },
     ]

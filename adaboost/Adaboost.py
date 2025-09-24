@@ -173,11 +173,19 @@ class AdaBoostCV:
         y_hat = (self.oof_proba_ >= threshold).astype(int)
         tn, fp, fn, tp = confusion_matrix(y, y_hat).ravel()
 
+        # precision
+        precision = float(tp / (tp + fp)) if (tp + fp) > 0 else 0.0
+
+        #specificity
+        specificity = float(tn) / (tn + fp) if (tn + fp) > 0 else 0.0
+
         out = {
             "n_splits": self.cfg.n_splits,
             "threshold": threshold,
             "accuracy_mean": acc_mean,
             "accuracy_std": acc_std,
+            "precision": precision,
+            "specificity": specificity,
             "confusion_matrix": {"tn": int(tn), "fp": int(fp), "fn": int(fn), "tp": int(tp)},
         }
         logger.info("Summary metriche: %s", out)

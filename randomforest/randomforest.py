@@ -132,6 +132,11 @@ class RandomForestCV:
         acc_std = float(np.std(fold_acc, ddof=1)) if len(fold_acc) > 1 else 0.0
         tn, fp, fn, tp = confusion_matrix(y, (self.oof_proba_ >= threshold).astype(int)).ravel()
 
+        # precision
+        precision = float(tp / (tp + fp)) if (tp + fp) > 0 else 0.0
+
+        specificity = float(tn) / (tn + fp) if (tn + fp) > 0 else 0.0
+
         logger.info("Accuracy media=%.4f ± %.4f | Confusion matrix tn=%d fp=%d fn=%d tp=%d",
                     acc_mean, acc_std, tn, fp, fn, tp)
 
@@ -140,6 +145,8 @@ class RandomForestCV:
             "threshold": threshold,
             "accuracy_mean": acc_mean,
             "accuracy_std": acc_std,
+            "precision": precision,
+            "specificity": specificity,
             "confusion_matrix": {"tn": int(tn), "fp": int(fp), "fn": int(fn), "tp": int(tp)},
         }
 
