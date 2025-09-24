@@ -3,9 +3,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics import ConfusionMatrixDisplay
 
-from Adaboost import AdaBoostCV
+from adaboost.Adaboost import AdaBoostCV
 from preprocessing.preprocessing import preprocess_dataset
-from randomforest import RandomForestCV
+from randomforest.randomforest import RandomForestCV
 import logging
 
 logging.basicConfig(
