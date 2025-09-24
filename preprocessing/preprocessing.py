@@ -1,12 +1,15 @@
 import numpy as np
 import pandas as pd
 import seaborn as sns
+import logging
 from matplotlib import pyplot as plt
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.impute import KNNImputer
 
+logger = logging.getLogger(__name__)
 
 def encode_booleans(df: pd.DataFrame) -> pd.DataFrame:
+    logger.info("Encoding colonne booleane")
     bool_cols = ['Transported', 'VIP', 'CryoSleep']
     for col in bool_cols:
         if col in df.columns:
@@ -15,13 +18,14 @@ def encode_booleans(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def add_group_features(df: pd.DataFrame) -> pd.DataFrame:
+    logger.info("Aggiunta feature di gruppo da PassengerId")
     df['Group'] = df['PassengerId'].str.split('_').str[0].astype(int)
     group_counts = df['Group'].value_counts()
     df['Group_size'] = df['Group'].map(group_counts)
     return df
 
 
-#non usata piu
+#non usata più poichè non ha migliorato le prestazioni del modello
 def add_lastname_feature(df: pd.DataFrame) -> pd.DataFrame:
     df['Lastname'] = df['Name'].str.split().str[-1]
     df['Name']= df['Name'].str.rsplit(n=1).str[0]
@@ -31,7 +35,7 @@ def add_lastname_feature(df: pd.DataFrame) -> pd.DataFrame:
 def add_cabin_features(df: pd.DataFrame, drop_original: bool = True) -> pd.DataFrame:
     if 'Cabin' not in df.columns:
         return df
-
+    logger.info("Estrazione feature dalla colonna Cabin")
     cabin_split = df['Cabin'].str.split('/', expand=True)
     df['Deck'] = cabin_split[0].fillna("Unknown")
     df['CabinNum'] = pd.to_numeric(cabin_split[1], errors="coerce")
@@ -53,6 +57,7 @@ def add_cabin_features(df: pd.DataFrame, drop_original: bool = True) -> pd.DataF
 
 
 def add_expense_features(df: pd.DataFrame) -> pd.DataFrame:
+    logger.info("Creazione feature spese (RoomService, FoodCourt, ...)")
     expense_cols = ['RoomService', 'FoodCourt', 'ShoppingMall', 'Spa', 'VRDeck']
     df[expense_cols] = df[expense_cols].fillna(0)
 
@@ -68,6 +73,7 @@ def knn_impute_sklearn(df: pd.DataFrame, n_neighbors: int = 15) -> pd.DataFrame:
     """
     Versione semplificata: usa direttamente sklearn.impute.KNNImputer
     """
+    logger.info(f"Imputazione valori mancanti con KNNImputer (n_neighbors={n_neighbors})")
     df = df.copy().replace({pd.NA: np.nan})
     exclude_cols = ["Transported", "PassengerId"]
 
@@ -80,6 +86,7 @@ def knn_impute_sklearn(df: pd.DataFrame, n_neighbors: int = 15) -> pd.DataFrame:
 
 
 def encode_categoricals(df: pd.DataFrame) -> pd.DataFrame:
+    logger.info("Encoding delle variabili categoriche")
     categorical = ['HomePlanet', 'Destination', 'Cabin_region']
 
     for col in categorical:
@@ -112,6 +119,7 @@ def encode_categoricals(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def remove_highly_correlated(df: pd.DataFrame, threshold: float = 0.9,save_corr_plot: str = "correlation_matrix.png") -> pd.DataFrame:
+    logger.info(f"Rimozione feature con correlazione > {threshold}")
     numeric_cols = df.select_dtypes(include=[np.number]).columns
     corr_matrix = df[numeric_cols].corr().abs()
 
@@ -128,11 +136,11 @@ def remove_highly_correlated(df: pd.DataFrame, threshold: float = 0.9,save_corr_
     to_drop = [col for col in upper.columns if any(upper[col] > threshold)]
     df_reduced = df.drop(columns=to_drop)
 
-    print(f"Feature rimosse (correlazione > {threshold}): {to_drop}")
     return df_reduced
 
 
 def preprocess_dataset(df: pd.DataFrame) -> pd.DataFrame:
+    logger.info("Inizio preprocessing del dataset...")
     df = encode_booleans(df)
     df = add_group_features(df)
     df = add_cabin_features(df)
@@ -144,4 +152,5 @@ def preprocess_dataset(df: pd.DataFrame) -> pd.DataFrame:
     df = df.drop(columns=["PassengerId", "Name"], errors="ignore")
 
     df = remove_highly_correlated(df, threshold=0.8)
+    logger.info("Preprocessing completato")
     return df

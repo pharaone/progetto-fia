@@ -3,15 +3,17 @@ from dataclasses import dataclass
 from typing import List, Dict, Any, Optional, Tuple
 import numpy as np
 import pandas as pd
+import logging
 
-from sklearn.compose import ColumnTransformer, make_column_selector as selector
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
-from sklearn.impute import SimpleImputer
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import confusion_matrix
 from sklearn.model_selection import GridSearchCV
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class Config:
@@ -41,6 +43,10 @@ class RandomForestCV:
         self.models_: List[Pipeline] = []
         self.oof_proba_: Optional[np.ndarray] = None
         self.fold_indices_: List[np.ndarray] = []
+        logger.info(
+            "RandomForestCV inizializzato | n_splits=%d, RF(n_estimators=%d, max_depth=%s, max_features=%s)",
+            self.cfg.n_splits, self.cfg.n_estimators, str(self.cfg.max_depth), str(self.cfg.max_features)
+        )
 
     # --- utils ---
     def _split_X_y(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
@@ -51,6 +57,7 @@ class RandomForestCV:
         drop = [c for c in self.cfg.drop_cols if c in X.columns]
         if drop:
             X = X.drop(columns=drop)
+        logger.info("Split X/y effettuato | X shape=%s, y len=%d", tuple(X.shape), len(y))
         return X, y
 
     def _make_pipeline(self) -> Pipeline:
@@ -67,6 +74,7 @@ class RandomForestCV:
 
     # --- training ---
     def fit(self, df: pd.DataFrame) -> "RandomForestCV":
+        logger.info("Inizio training con StratifiedKFold (%d splits)...", self.cfg.n_splits)
         X, y = self._split_X_y(df)
         skf = StratifiedKFold(
             n_splits=self.cfg.n_splits,
@@ -81,6 +89,7 @@ class RandomForestCV:
         numeric_cols = X.select_dtypes(include=[np.number]).columns.tolist()
 
         for tr_idx, va_idx in skf.split(X, y):
+            logger.info("Training fold")
             # Standardizzazione training set
             scaler = StandardScaler()
             X_train_scaled = X.iloc[tr_idx].copy()
@@ -109,6 +118,7 @@ class RandomForestCV:
         if self.oof_proba_ is None or not self.fold_indices_:
             raise RuntimeError("Chiama fit() prima.")
 
+        logger.info("Calcolo metriche OOF con threshold=%.2f", threshold)
         _, y = self._split_X_y(df)
         y = y.values
 
@@ -121,6 +131,9 @@ class RandomForestCV:
         acc_mean = float(np.mean(fold_acc))
         acc_std = float(np.std(fold_acc, ddof=1)) if len(fold_acc) > 1 else 0.0
         tn, fp, fn, tp = confusion_matrix(y, (self.oof_proba_ >= threshold).astype(int)).ravel()
+
+        logger.info("Accuracy media=%.4f ± %.4f | Confusion matrix tn=%d fp=%d fn=%d tp=%d",
+                    acc_mean, acc_std, tn, fp, fn, tp)
 
         return {
             "n_splits": self.cfg.n_splits,
@@ -147,6 +160,9 @@ class RandomForestCV:
                 "rf__max_features": ["sqrt", "log2", 0.5],
                 "rf__class_weight": [None, "balanced"]
             }
+
+        logger.info("Avvio GridSearchCV con %d combinazioni parametri, cv=%d",
+                    int(np.prod([len(v) for v in param_grid.values()])), cv)
 
         # Creiamo una pipeline temporanea con StandardScaler
         numeric_cols = X.select_dtypes(include=[np.number]).columns.tolist()
@@ -190,4 +206,5 @@ class RandomForestCV:
             if key.startswith("rf__"):
                 setattr(self.cfg, key[4:], val)
 
+        logger.info("Migliori iperparametri trovati: %s", best_params)
         return best_params

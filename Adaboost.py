@@ -8,9 +8,7 @@ import logging
 import time
 import warnings
 
-from sklearn.compose import ColumnTransformer, make_column_selector as selector
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
-from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 from sklearn.ensemble import AdaBoostClassifier
 from sklearn.tree import DecisionTreeClassifier
@@ -46,21 +44,7 @@ class AdaBoostCV:
         self.models_: List[Pipeline] = []
         self.oof_proba_: Optional[np.ndarray] = None
         self.fold_indices_: List[np.ndarray] = []
-        self.enable_logging(self.cfg.log_level)
         logger.debug("AdaBoostCV inizializzato con config: %s", self.cfg)
-
-    # ------- Utils logging -------
-    @staticmethod
-    def enable_logging(level: int = logging.INFO):
-        root = logging.getLogger()
-        if not root.handlers:
-            logging.basicConfig(
-                level=level,
-                format="%(asctime)s [%(levelname)s] %(name)s - %(message)s"
-            )
-        else:
-            root.setLevel(level)
-        logger.setLevel(level)
 
     @staticmethod
     def _class_balance(y: pd.Series) -> Dict[str, float]:
@@ -102,7 +86,7 @@ class AdaBoostCV:
     # ---------------- TRAIN ----------------
     def fit(self, df: pd.DataFrame) -> "AdaBoostCV":
         t0 = time.perf_counter()
-        logger.info("== Inizio fit AdaBoostCV ==")
+        logger.info("Inizio fit AdaBoostCV")
         X, y = self._split_X_y(df)
 
         skf = StratifiedKFold(
@@ -122,7 +106,7 @@ class AdaBoostCV:
         with warnings.catch_warnings(record=True) as wlist:
             warnings.simplefilter("always")
             for fold, (tr_idx, va_idx) in enumerate(skf.split(X, y), start=1):
-                logger.info("-- Fold %d/%d: train=%d, valid=%d",
+                logger.info("Fold %d/%d: train=%d, valid=%d",
                             fold, self.cfg.n_splits, len(tr_idx), len(va_idx))
                 try:
                     t_fold = time.perf_counter()
@@ -157,9 +141,9 @@ class AdaBoostCV:
             for w in wlist:
                 logger.warning("Warning catturato durante fit: %s: %s", w.category.__name__, str(w.message))
 
-        logger.info("== Fit completato in %.3fs ==", time.perf_counter() - t0)
+        logger.info("Fit completato in %.3fs", time.perf_counter() - t0)
         return self
-    # ---------------- RIASSUNTO METRICHE ----------------
+
     def summary_metrics(self, df: pd.DataFrame, threshold: float = 0.5) -> Dict[str, Any]:
         """
         Ritorna:
@@ -198,7 +182,6 @@ class AdaBoostCV:
         logger.info("Summary metriche: %s", out)
         return out
 
-    # ---------------- INFERENZA ----------------
     def predict_proba(self, df: pd.DataFrame) -> np.ndarray:
         if not self.models_:
             logger.error("predict_proba chiamato prima di fit().")
