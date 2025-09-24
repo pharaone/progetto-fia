@@ -40,21 +40,28 @@ def main():
     # 3) Hyperparameter tuning RandomForest
     rf = RandomForestCV()
     print("Esecuzione tuning iperparametri RandomForest...")
-    best_params = rf.tune_hyperparameters(dataset_p, cv=3)
-    print("Migliori parametri RandomForest:", best_params)
+    best_params_rf = rf.tune_hyperparameters(dataset_p, cv=3)
+    print("Migliori parametri RandomForest:", best_params_rf)
 
     # 4) Fit finale sui fold
     print("Fit finale RandomForest con parametri ottimali...")
     rf.fit(dataset_p)
 
-    # 5) AdaBoost fit
-    ada = AdaBoostCV().fit(dataset_p)
+    # 5) Hyperparameter tuning AdaBoost
+    ada = AdaBoostCV()
+    print("Esecuzione tuning iperparametri AdaBoost...")
+    best_params_ada = ada.tune_hyperparameters(dataset_p, cv=3)
+    print("Migliori parametri AdaBoost:", best_params_ada)
 
-    # 6) Riassunti metriche
+    # 6) Fit finale sui fold
+    print("Fit finale AdaBoost con parametri ottimali...")
+    ada.fit(dataset_p)
+
+    # 7) Riassunti metriche
     rf_sum = rf.summary_metrics(dataset_p, threshold=THRESHOLD)
     ada_sum = ada.summary_metrics(dataset_p, threshold=THRESHOLD)
 
-    # 7) Grafici confusion matrix
+    # 8) Grafici confusion matrix
     plot_confusion_from_dict(
         rf_sum["confusion_matrix"],
         title=f"Confusion Matrix - RandomForest (thr={THRESHOLD})",
@@ -66,7 +73,7 @@ def main():
         save_path="confusion_adaboost.png",
     )
 
-    # 6) CSV con accuracy mean/std
+    # 9) CSV con accuracy mean/std/sem
     def _safe_sem(summary: dict) -> float:
         if "accuracy_sem" in summary and summary["accuracy_sem"] is not None:
             return float(summary["accuracy_sem"])
@@ -96,6 +103,7 @@ def main():
 
     print("Fatto!")
     print("Salvati: confusion_rf.png, confusion_adaboost.png, metrics_summary.csv")
+
 
 
 if __name__ == "__main__":

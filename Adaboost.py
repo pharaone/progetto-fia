@@ -16,24 +16,23 @@ from sklearn.ensemble import AdaBoostClassifier
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import confusion_matrix
+from sklearn.model_selection import GridSearchCV
+
 
 logger = logging.getLogger(__name__)
 
 @dataclass
 class ConfigAdaBoost:
-    """Configurazione base per AdaBoost + K-Fold con logging."""
     n_splits: int = 10
     random_state: int = 42
     shuffle: bool = True
-    # Parametri AdaBoost
+    # Parametri AdaBoost (senza 'algorithm')
     n_estimators: int = 150
     learning_rate: float = 0.1
-    algorithm: str = "SAMME"   # probabilità più stabili in binario
-    base_max_depth: int = 3    # stump (classico per AdaBoost)
-    # colonne da escludere
+    base_max_depth: int = 3
     drop_cols: Tuple[str, ...] = ("PassengerId", "Name", "Cabin")
-    # logging
     log_level: int = logging.INFO
+
 
 class AdaBoostCV:
     """
@@ -94,7 +93,6 @@ class AdaBoostCV:
             estimator=base_tree,
             n_estimators=self.cfg.n_estimators,
             learning_rate=self.cfg.learning_rate,
-            algorithm=self.cfg.algorithm,
             random_state=self.cfg.random_state
         )
         pipe = Pipeline([("clf", ada)])
@@ -225,3 +223,60 @@ class AdaBoostCV:
     def predict(self, df: pd.DataFrame, threshold: float = 0.5) -> np.ndarray:
         logger.info("Predict con threshold=%.3f", threshold)
         return (self.predict_proba(df) >= threshold).astype(int)
+    
+        # --- hyperparameter tuning ---
+    def tune_hyperparameters(
+        self,
+        df: pd.DataFrame,
+        param_grid: Optional[Dict[str, list]] = None,
+        cv: int = 3,
+        scoring: str = "accuracy",
+    ) -> Dict[str, Any]:
+        """
+        Esegue una grid-search su AdaBoost (e profondità del base learner).
+        Aggiorna self.cfg con i migliori iperparametri trovati.
+        Ritorna: dict con best_params_ e best_score_.
+        """
+        logger.info("== Inizio tuning iperparametri AdaBoost ==")
+        X, y = self._split_X_y(df)
+
+        # default grid senza algorithm
+        if param_grid is None:
+            param_grid = {
+                "clf__n_estimators": [50, 150, 300],
+                "clf__learning_rate": [0.01, 0.05, 0.1, 0.5, 1.0],
+                "clf__estimator__max_depth": [1, 2, 3],  # profondità del tree base
+            }
+
+        # scaling come nel fit()
+        numeric_cols = X.select_dtypes(include=[np.number]).columns.tolist()
+        scaler = StandardScaler()
+        X_scaled = X.copy()
+        X_scaled[numeric_cols] = scaler.fit_transform(X_scaled[numeric_cols])
+
+        pipe = self._make_pipeline()
+
+        grid = GridSearchCV(
+            estimator=pipe,
+            param_grid=param_grid,
+            scoring=scoring,
+            cv=cv,
+            n_jobs=-1,
+            verbose=2
+        )
+        grid.fit(X_scaled, y)
+
+        best_params = grid.best_params_
+        best_score = grid.best_score_
+        logger.info("Migliori iperparametri AdaBoost: %s (score=%.4f)", best_params, best_score)
+
+        # aggiorna la config interna (chiavi del Pipeline: 'clf__*')
+        if "clf__n_estimators" in best_params:
+            self.cfg.n_estimators = best_params["clf__n_estimators"]
+        if "clf__learning_rate" in best_params:
+            self.cfg.learning_rate = best_params["clf__learning_rate"]
+        if "clf__estimator__max_depth" in best_params:
+            self.cfg.base_max_depth = best_params["clf__estimator__max_depth"]
+
+        return {"best_params": best_params, "best_score": best_score}
+

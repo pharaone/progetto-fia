@@ -13,11 +13,10 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import confusion_matrix
 from sklearn.model_selection import GridSearchCV
 
-
 @dataclass
 class Config:
     """Configurazione base per RandomForest + K-Fold."""
-    n_splits: int = 5
+    n_splits: int = 10
     random_state: int = 42
     shuffle: bool = True
     # RandomForest
