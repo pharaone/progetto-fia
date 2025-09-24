@@ -236,8 +236,8 @@ class AdaBoostCV:
         if param_grid is None:
             param_grid = {
                 "clf__n_estimators": [50, 150, 300],
-                "clf__learning_rate": [0.01, 0.05, 0.1, 0.5, 1.0],
-                "clf__estimator__max_depth": [1, 2, 3],  # profondità del tree base
+                "clf__learning_rate": [0.05, 0.1, 0.5, 1.0],
+                "clf__estimator__max_depth": [3, 4, 5],  # profondità del tree base
             }
 
         # scaling come nel fit()
